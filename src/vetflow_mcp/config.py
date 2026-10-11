@@ -24,15 +24,17 @@ class Settings:
         email: credencial usada no POST /auth/login.
         password: senha correspondente.
         timeout_s: timeout por requisição HTTP, em segundos.
+        enable_writes: habilita as tools de escrita (fase 2). Default: False.
     """
 
     base_url: str
     email: str
     password: str
     timeout_s: float = 15.0
+    enable_writes: bool = False
 
     @classmethod
-    def from_env(cls) -> "Settings":
+    def from_env(cls) -> Settings:
         """Monta Settings a partir do ambiente, validando o que é obrigatório."""
         base_url = os.environ.get("VETFLOW_BASE_URL", "").rstrip("/")
         email = os.environ.get("VETFLOW_EMAIL", "")
@@ -55,4 +57,16 @@ class Settings:
             )
 
         timeout_s = float(os.environ.get("VETFLOW_TIMEOUT_S", "15"))
-        return cls(base_url=base_url, email=email, password=password, timeout_s=timeout_s)
+        enable_writes = os.environ.get("VETFLOW_ENABLE_WRITES", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+        return cls(
+            base_url=base_url,
+            email=email,
+            password=password,
+            timeout_s=timeout_s,
+            enable_writes=enable_writes,
+        )

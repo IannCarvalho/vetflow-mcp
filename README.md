@@ -1,5 +1,7 @@
 # vetflow-mcp
 
+[![CI](https://github.com/IannCarvalho/vetflow-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/IannCarvalho/vetflow-mcp/actions/workflows/ci.yml)
+
 Servidor **MCP (Model Context Protocol)** que expõe o backend do
 [VetFlow](../vetflow-backend) — um SaaS de gestão veterinária — como ferramentas
 que qualquer LLM compatível (Claude Desktop, etc.) pode chamar em linguagem
@@ -47,6 +49,22 @@ Fase 1 — **só-leitura** (10 tools, todas em `server.py`):
 
 Escrita (criar consulta, lançar fatura) é fase 2 opcional, deixada de fora de
 propósito para um MCP seguro de expor.
+
+### Fase 2 — tools de escrita (opt-in)
+
+Desligadas por padrão. Defina `VETFLOW_ENABLE_WRITES=true` para registrá-las.
+Cobrem apenas CREATE/UPDATE — **DELETE não é exposto** (destrutivo e
+irreversível, deixado de fora de propósito):
+
+| Tool | Endpoint |
+|---|---|
+| `criar_cliente(...)` / `atualizar_cliente(...)` | `POST`/`PUT /clients` |
+| `criar_pet(...)` / `atualizar_pet(...)` | `POST`/`PUT /pets` |
+| `agendar_compromisso(...)` | `POST /appointments` |
+| `mudar_status_compromisso(...)` | `PUT /appointments/{id}` |
+
+O escopo ao vet autenticado e os campos `vet_id`/`created_at` são setados pelo
+backend a partir do token — as tools enviam só os campos de negócio.
 
 ## Setup
 

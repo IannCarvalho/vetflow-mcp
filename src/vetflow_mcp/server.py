@@ -209,9 +209,17 @@ async def metricas_dashboard() -> dict[str, int]:
 def main() -> None:
     """Ponto de entrada do console script `vetflow-mcp`. Roda via stdio."""
     try:
-        Settings.from_env()  # falha cedo e claro se faltar credencial
+        settings = Settings.from_env()  # falha cedo e claro se faltar credencial
     except RuntimeError as exc:
         raise SystemExit(str(exc)) from exc
+
+    # Fase 2: tools de escrita só são registradas sob flag explícito. No modo
+    # padrão, apenas a superfície de leitura acima fica exposta.
+    if settings.enable_writes:
+        from .write_tools import register_write_tools
+
+        register_write_tools(mcp, _get_client)
+
     mcp.run()  # transporte stdio por padrão
 
 

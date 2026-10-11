@@ -122,7 +122,7 @@ class VetFlowClient:
         try:
             body = resp.json()
             detail = body.get("error") or body.get("message") or ""
-        except Exception:  # corpo não-JSON
+        except (ValueError, AttributeError):  # corpo não-JSON ou não-objeto
             detail = (resp.text or "")[:200]
         suffix = f" — {detail}" if detail else ""
         return f"{method} {path} falhou (HTTP {resp.status_code}){suffix}"
