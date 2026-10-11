@@ -34,10 +34,10 @@ def fake_backend():
 async def test_buscar_cliente_filtra_por_nome(fake_backend) -> None:
     fake_backend.get(f"{BASE}/clients").mock(
         return_value=httpx.Response(
-            200, json=[{"id": "1", "name": "Ana Lima"}, {"id": "2", "name": "Bruno"}]
+            200, json=[{"id": "1", "full_name": "Ana Lima"}, {"id": "2", "full_name": "Bruno"}]
         )
     )
-    assert await server.buscar_cliente("ana") == [{"id": "1", "name": "Ana Lima"}]
+    assert await server.buscar_cliente("ana") == [{"id": "1", "full_name": "Ana Lima"}]
 
 
 async def test_listar_pets_do_cliente_passa_owner_id(fake_backend) -> None:
@@ -90,9 +90,17 @@ async def test_faturas_pendentes_filtra_status(fake_backend) -> None:
     assert {f["id"] for f in result} == {"i1", "i3"}
 
 
+async def test_buscar_cliente_usa_full_name(fake_backend) -> None:
+    """Regressão (pego no teste e2e): o model Client usa full_name, não name."""
+    fake_backend.get(f"{BASE}/clients").mock(
+        return_value=httpx.Response(200, json=[{"id": "1", "full_name": "Teste E2E"}])
+    )
+    assert len(await server.buscar_cliente("teste")) == 1
+
+
 async def test_buscar_cliente_sem_nome_retorna_todos(fake_backend) -> None:
     fake_backend.get(f"{BASE}/clients").mock(
-        return_value=httpx.Response(200, json=[{"id": "1", "name": "Ana"}, {"id": "2", "name": "Bia"}])
+        return_value=httpx.Response(200, json=[{"id": "1", "full_name": "Ana"}, {"id": "2", "full_name": "Bia"}])
     )
     assert len(await server.buscar_cliente("  ")) == 2
 

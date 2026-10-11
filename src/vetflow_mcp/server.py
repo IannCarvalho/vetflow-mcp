@@ -65,7 +65,9 @@ async def buscar_cliente(nome: str) -> list[dict[str, Any]]:
     clientes = await _get_client().get("/clients") or []
     if not nome.strip():
         return clientes
-    return [c for c in clientes if _contains(c.get("name"), nome)]
+    # O model Client do backend usa `full_name` (as demais entidades usam `name`);
+    # mantemos `name` como fallback por robustez.
+    return [c for c in clientes if _contains(c.get("full_name") or c.get("name"), nome)]
 
 
 @mcp.tool()
