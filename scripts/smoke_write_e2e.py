@@ -1,34 +1,39 @@
-﻿"""Smoke test de ESCRITA end-to-end contra o backend local vivo.
+"""Smoke test de ESCRITA end-to-end contra o backend local vivo.
 
-ForÃ§a VETFLOW_ENABLE_WRITES antes de importar, registra as write tools e
+Forca VETFLOW_ENABLE_WRITES antes de importar, registra as write tools e
 exercita criar_cliente -> criar_pet -> registrar_vacina, confirmando por leitura.
-Script de verificaÃ§Ã£o manual, nÃ£o faz parte da suÃ­te.
+Script de verificacao manual, nao faz parte da suite.
+
+Uso: VETFLOW_ENABLE_WRITES e definido abaixo em runtime (antes de ler Settings),
+entao basta `python scripts/smoke_write_e2e.py` com o .env preenchido.
 """
 
 import asyncio
 import os
 
-os.environ["VETFLOW_ENABLE_WRITES"] = "true"
-
-from vetflow_mcp import server  # noqa: E402
-from vetflow_mcp.config import Settings  # noqa: E402
-from vetflow_mcp.write_tools import register_write_tools  # noqa: E402
-
 
 async def main() -> None:
+    os.environ["VETFLOW_ENABLE_WRITES"] = "true"
+
+    from vetflow_mcp import server
+    from vetflow_mcp.config import Settings
+    from vetflow_mcp.write_tools import register_write_tools
+
     assert Settings.from_env().enable_writes is True
     register_write_tools(server.mcp, server._get_client)
 
     nomes = {t.name for t in await server.mcp.list_tools()}
     print("tools totais:", len(nomes), "| escrita presente:", "criar_cliente" in nomes)
 
+    def structured(res: object) -> dict:
+        return getattr(res, "structured_content", None) or {}
+
     print("\n== criar_cliente ==")
     cliente = await server.mcp.call_tool(
         "criar_cliente",
         {"full_name": "Teste MCP E2E", "phone": "83999990000"},
     )
-    cliente_obj = getattr(cliente, "structured_content", None) or {}
-    cid = (cliente_obj or {}).get("id")
+    cid = structured(cliente).get("id")
     print("criado cliente id:", cid)
 
     print("\n== criar_pet ==")
@@ -36,8 +41,7 @@ async def main() -> None:
         "criar_pet",
         {"owner_id": cid, "name": "RexE2E", "species": "dog", "weight": 10.0},
     )
-    pet_obj = getattr(pet, "structured_content", None) or {}
-    pid = (pet_obj or {}).get("id")
+    pid = structured(pet).get("id")
     print("criado pet id:", pid)
 
     print("\n== registrar_vacina ==")
@@ -45,8 +49,7 @@ async def main() -> None:
         "registrar_vacina",
         {"pet_id": pid, "vaccine_name": "V8 E2E", "batch": "LOTE-E2E"},
     )
-    vac_obj = getattr(vac, "structured_content", None) or {}
-    print("criada vacina id:", (vac_obj or {}).get("id"))
+    print("criada vacina id:", structured(vac).get("id"))
 
     print("\n== verificacao por leitura ==")
     achados = await server.buscar_cliente("Teste MCP E2E")
@@ -61,4 +64,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-
