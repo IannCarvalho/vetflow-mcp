@@ -219,3 +219,82 @@ def register_write_tools(
         """
         payload = {"status": status}
         return await get_client().put(f"/appointments/{appointment_id}", json=payload) or {}
+
+    # ----- Consultas -------------------------------------------------------- #
+
+    @mcp.tool()
+    async def registrar_consulta(
+        pet_id: str,
+        main_complaint: str,
+        date: str = "",
+        evolution_time: str = "",
+        pain: bool = False,
+        notes_summary: str = "",
+    ) -> dict[str, Any]:
+        """Registra uma consulta clínica para um pet.
+
+        O backend exige apenas `pet_id` e a queixa principal; os demais campos
+        da ficha (dieta, fisiológico, resumo) são opcionais e podem ser
+        preenchidos depois pela UI do VetFlow.
+
+        Args:
+            pet_id: id do pet (obrigatório).
+            main_complaint: queixa principal / motivo da consulta (obrigatório).
+            date: data da consulta em ISO 8601; vazio = agora no backend.
+            evolution_time: há quanto tempo evolui o quadro (opcional).
+            pain: o animal apresenta dor? (opcional).
+            notes_summary: resumo livre da consulta (opcional).
+        """
+        payload: dict[str, Any] = {
+            "pet_id": pet_id,
+            "anamnesis": {
+                "main_complaint": main_complaint,
+                "evolution_time": evolution_time,
+                "pain": pain,
+            },
+            "summary": {"evolution_time": evolution_time},
+        }
+        if date:
+            payload["date"] = date
+        if notes_summary:
+            payload["summary"]["medications"] = notes_summary
+        return await get_client().post("/consultations", json=payload) or {}
+
+    # ----- Vacinas ---------------------------------------------------------- #
+
+    @mcp.tool()
+    async def registrar_vacina(
+        pet_id: str,
+        vaccine_name: str,
+        date_applied: str = "",
+        next_dose_date: str = "",
+        batch: str = "",
+        manufacturer: str = "",
+        notes: str = "",
+    ) -> dict[str, Any]:
+        """Registra uma vacina aplicada a um pet.
+
+        O backend exige apenas `pet_id` e `vaccine_name`.
+
+        Args:
+            pet_id: id do pet (obrigatório).
+            vaccine_name: nome da vacina (obrigatório).
+            date_applied: data da aplicação em ISO 8601 (opcional).
+            next_dose_date: data da próxima dose em ISO 8601 (opcional) —
+                é o que alimenta a tool de leitura `vacinas_a_vencer`.
+            batch: lote (opcional).
+            manufacturer: fabricante (opcional).
+            notes: observações (opcional).
+        """
+        payload: dict[str, Any] = {
+            "pet_id": pet_id,
+            "vaccine_name": vaccine_name,
+            "batch": batch,
+            "manufacturer": manufacturer,
+            "notes": notes,
+        }
+        if date_applied:
+            payload["date_applied"] = date_applied
+        if next_dose_date:
+            payload["next_dose_date"] = next_dose_date
+        return await get_client().post("/vaccines", json=payload) or {}

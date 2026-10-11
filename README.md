@@ -1,6 +1,7 @@
 # vetflow-mcp
 
 [![CI](https://github.com/IannCarvalho/vetflow-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/IannCarvalho/vetflow-mcp/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/IannCarvalho/vetflow-mcp/branch/main/graph/badge.svg)](https://codecov.io/gh/IannCarvalho/vetflow-mcp)
 
 Servidor **MCP (Model Context Protocol)** que expõe o backend do
 [VetFlow](../vetflow-backend) — um SaaS de gestão veterinária — como ferramentas
@@ -62,6 +63,8 @@ irreversível, deixado de fora de propósito):
 | `criar_pet(...)` / `atualizar_pet(...)` | `POST`/`PUT /pets` |
 | `agendar_compromisso(...)` | `POST /appointments` |
 | `mudar_status_compromisso(...)` | `PUT /appointments/{id}` |
+| `registrar_consulta(...)` | `POST /consultations` |
+| `registrar_vacina(...)` | `POST /vaccines` |
 
 O escopo ao vet autenticado e os campos `vet_id`/`created_at` são setados pelo
 backend a partir do token — as tools enviam só os campos de negócio.
