@@ -88,3 +88,112 @@ async def test_faturas_pendentes_filtra_status(fake_backend) -> None:
     )
     result = await server.faturas_pendentes()
     assert {f["id"] for f in result} == {"i1", "i3"}
+
+
+async def test_buscar_cliente_sem_nome_retorna_todos(fake_backend) -> None:
+    fake_backend.get(f"{BASE}/clients").mock(
+        return_value=httpx.Response(200, json=[{"id": "1", "name": "Ana"}, {"id": "2", "name": "Bia"}])
+    )
+    assert len(await server.buscar_cliente("  ")) == 2
+
+
+async def test_buscar_pet_filtra_por_nome(fake_backend) -> None:
+    fake_backend.get(f"{BASE}/pets").mock(
+        return_value=httpx.Response(
+            200, json=[{"id": "p1", "name": "Rex"}, {"id": "p2", "name": "Mia"}]
+        )
+    )
+    assert await server.buscar_pet("rex") == [{"id": "p1", "name": "Rex"}]
+    # nome vazio devolve todos
+    assert len(await server.buscar_pet("")) == 2
+
+
+async def test_ficha_do_pet(fake_backend) -> None:
+    fake_backend.get(f"{BASE}/pets/p1").mock(
+        return_value=httpx.Response(200, json={"id": "p1", "name": "Rex", "species": "dog"})
+    )
+    ficha = await server.ficha_do_pet("p1")
+    assert ficha["species"] == "dog"
+
+
+async def test_historico_consultas_ordena_desc(fake_backend) -> None:
+    route = fake_backend.get(f"{BASE}/consultations").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"id": "a", "date": "2026-01-01T00:00:00Z"},
+                {"id": "b", "date": "2026-06-01T00:00:00Z"},
+            ],
+        )
+    )
+    result = await server.historico_consultas("p1")
+    assert [c["id"] for c in result] == ["b", "a"]  # mais recente primeiro
+    assert route.calls.last.request.url.params["pet_id"] == "p1"
+
+
+async def test_historico_vacinas_ordena_desc(fake_backend) -> None:
+    fake_backend.get(f"{BASE}/vaccines").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"id": "v1", "date_applied": "2025-01-01T00:00:00Z"},
+                {"id": "v2", "date_applied": "2026-01-01T00:00:00Z"},
+            ],
+        )
+    )
+    result = await server.historico_vacinas("p1")
+    assert [v["id"] for v in result] == ["v2", "v1"]
+
+
+async def test_vacinas_a_vencer_ignora_data_invalida(fake_backend) -> None:
+    fake_backend.get(f"{BASE}/vaccines").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"id": "v1", "next_dose_date": "data-podre"},
+                {"id": "v2"},  # sem next_dose_date
+            ],
+        )
+    )
+    assert await server.vacinas_a_vencer() == []
+
+
+async def test_agenda_do_dia_monta_janela(fake_backend) -> None:
+    route = fake_backend.get(f"{BASE}/appointments").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"id": "a2", "start_time": "2026-10-12T15:00:00Z"},
+                {"id": "a1", "start_time": "2026-10-12T09:00:00Z"},
+            ],
+        )
+    )
+    result = await server.agenda_do_dia("2026-10-12")
+    assert [a["id"] for a in result] == ["a1", "a2"]  # ordenado por horário
+    params = route.calls.last.request.url.params
+    assert "2026-10-12" in params["start"]
+    assert "2026-10-13" in params["end"]
+
+
+def test_main_sem_credencial_sai_com_erro(monkeypatch) -> None:
+    for var in ("VETFLOW_BASE_URL", "VETFLOW_EMAIL", "VETFLOW_PASSWORD"):
+        monkeypatch.delenv(var, raising=False)
+    with pytest.raises(SystemExit):
+        server.main()
+
+
+def test_main_registra_writes_sob_flag(monkeypatch) -> None:
+    """Com o flag ligado, main() registra as tools de escrita antes de rodar."""
+    monkeypatch.setenv("VETFLOW_BASE_URL", BASE)
+    monkeypatch.setenv("VETFLOW_EMAIL", "v@t")
+    monkeypatch.setenv("VETFLOW_PASSWORD", "pw")
+    monkeypatch.setenv("VETFLOW_ENABLE_WRITES", "true")
+    # Não deixa o servidor realmente subir (mcp.run bloquearia).
+    monkeypatch.setattr(server.mcp, "run", lambda *a, **k: None)
+    server.main()
+    # As tools de escrita devem agora existir no servidor global.
+    import asyncio
+
+    nomes = {t.name for t in asyncio.run(server.mcp.list_tools())}
+    assert "registrar_consulta" in nomes
+    assert "registrar_vacina" in nomes
