@@ -5,9 +5,15 @@
 
 Servidor **MCP (Model Context Protocol)** que expõe o backend do
 [VetFlow](../vetflow-backend) — um SaaS de gestão veterinária — como ferramentas
-que qualquer LLM compatível (Claude Desktop, etc.) pode chamar em linguagem
-natural: *"quantas consultas tenho hoje?"*, *"as vacinas do Rex estão em dia?"*,
-*"me dá o resumo da clínica"*.
+que qualquer LLM compatível pode chamar em linguagem natural: *"quantas
+consultas tenho hoje?"*, *"as vacinas do Rex estão em dia?"*, *"me dá o resumo
+da clínica"*.
+
+**Consumidores:** além de clientes MCP de desktop (Claude Desktop etc.), este
+servidor é consumido pelo [`vetflow-agent`](../vetflow-agent), que o sobe como
+subprocesso stdio e expõe o chat no frontend do VetFlow. É o `vetflow-mcp` que
+dá ao agente as **ferramentas** para ler dados reais — o LLM sozinho não conhece
+a clínica.
 
 ## Arquitetura — "por fora"
 
@@ -115,7 +121,7 @@ vetflow-mcp/
 ├── src/vetflow_mcp/
 │   ├── config.py     # lê VETFLOW_* do ambiente
 │   ├── client.py     # HTTP autenticado: login, cache de token, refresh em 401
-│   └── server.py     # FastMCP + as tools
+│   └── server.py     # MCPServer (mcp 2.x) + as tools
 └── tests/
     └── test_client.py
 ```
