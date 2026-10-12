@@ -60,6 +60,24 @@ mora num só lugar e serve a todos os consumidores — em vez de cada agente
 reimplementar esse acoplamento. As descrições das tools (docstrings PT-BR) são o
 que cada LLM lê para decidir *quando* e *como* usá-las.
 
+### Por que um repositório separado (e não dentro do `vetflow-agent`)
+
+É tentador fundir os dois — ambos são Python e o agente é o principal
+consumidor. Mas o MCP é o **servidor** e o agente é apenas **um cliente** entre
+vários (Claude Desktop e outros clientes MCP usam este servidor **sem o agente
+existir**). Dissolver o MCP dentro do agente mataria exatamente a reutilização
+que justifica usar MCP: cada cliente teria que reimplementar o acoplamento com o
+backend. Servidor e cliente são papéis distintos e ficam em repositórios
+distintos, com CI e versionamento próprios.
+
+O agente **consome** este servidor sem fundir código: ele o inclui como git
+**submodule** (`vendor/vetflow-mcp`), o que mantém o deploy do agente autocontido
+sem transformar o MCP num detalhe interno dele. E a dor de ter dois *processos*
+(o agente sobe o MCP como subprocesso, custo de RAM) se resolve movendo o MCP
+para **in-process** no agente quando a escala exigir — isso elimina o segundo
+processo mantendo os dois repositórios separados e o modo stdio intacto para o
+Claude Desktop.
+
 ## Tools expostas
 
 Fase 1 — **só-leitura** (10 tools, todas em `server.py`):
