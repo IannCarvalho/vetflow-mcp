@@ -22,15 +22,18 @@ mesma API HTTP que o frontend usa — não acessa o banco direto, não é compil
 dentro do binário Go. Isso mantém o produto intocado e torna o MCP um projeto
 autocontido.
 
-```
-┌─────────────────┐   protocolo MCP (stdio)   ┌──────────────┐   HTTP + Bearer   ┌────────────────┐
-│ Claude Desktop  │ ────────────────────────► │  vetflow-mcp │ ────────────────► │ VetFlow backend│
-│   (ou outro)    │                           │   (Python)   │                   │   (Go + chi)   │
-└─────────────────┘                           └──────────────┘                   └───────┬────────┘
-                                                                                          │
-                                                                                     ┌────▼────┐
-                                                                                     │ MongoDB │
-                                                                                     └─────────┘
+```mermaid
+flowchart LR
+    desktop["Claude Desktop<br/>(ou outro cliente MCP)"]
+    agent["vetflow-agent"]
+    mcp["vetflow-mcp<br/>(Python)"]
+    be["VetFlow backend<br/>(Go + chi)"]
+    db[("MongoDB")]
+
+    desktop -- "protocolo MCP (stdio)" --> mcp
+    agent -- "protocolo MCP (stdio)" --> mcp
+    mcp -- "HTTP + Bearer JWT" --> be
+    be --> db
 ```
 
 Autenticação: o MCP faz `POST /auth/login` uma vez, guarda o JWT e o injeta como
