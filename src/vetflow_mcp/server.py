@@ -15,6 +15,9 @@ Execução (stdio, o transporte padrão para clientes desktop):
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -27,16 +30,69 @@ from .config import Settings
 # (transporte stdio por padrão) permanecem iguais.
 mcp = MCPServer("vetflow")
 
-# Cliente único e preguiçoso: criado no primeiro uso, reaproveitado entre tools
-# (reusa a conexão httpx e o cache de token).
+# --------------------------------------------------------------------------- #
+# Resolução do cliente: por REQUEST (contextvars), não por processo.          #
+#                                                                             #
+# Multi-tenancy é uma propriedade da INTERFACE, não um efeito de rodar em     #
+# processos separados. `_get_client()` resolve, nesta ordem:                  #
+#   1. o cliente do CONTEXTO atual (setado por `use_request_client`) — é o    #
+#      caminho por-request: cada chamada ao MCP in-process pode escopar o seu #
+#      próprio token sem vazar para outra. Dois usuários concorrentes no mesmo #
+#      processo ficam isolados.                                               #
+#   2. o cliente de MÓDULO (`_client`) — usado pelo modo subprocesso stdio    #
+#      (1 processo por request, Claude Desktop) e como ponto de injeção dos   #
+#      testes. Preguiçoso: criado do ambiente no primeiro uso.                #
+#                                                                             #
+# No modo subprocesso nada seta o contexto, então o comportamento é idêntico  #
+# ao do singleton anterior. O in-process ganha isolamento sem reescrever as   #
+# tools — todas continuam chamando `_get_client()`.                           #
+# --------------------------------------------------------------------------- #
+
+# Cliente da request atual (None fora de um `use_request_client`).
+_client_var: ContextVar[VetFlowClient | None] = ContextVar("vetflow_client", default=None)
+
+# Cliente de módulo (modo subprocesso / override de teste). Preguiçoso.
 _client: VetFlowClient | None = None
 
 
 def _get_client() -> VetFlowClient:
+    """Resolve o VetFlowClient: contexto da request primeiro, senão o de módulo.
+
+    Interface preservada: as 11 tools (e o `write_tools`) continuam chamando
+    isto sem mudança.
+    """
+    scoped = _client_var.get()
+    if scoped is not None:
+        return scoped
     global _client
     if _client is None:
         _client = VetFlowClient(Settings.from_env())
     return _client
+
+
+@asynccontextmanager
+async def use_request_client(token: str | None = None):
+    """Escopa um VetFlowClient à request atual (caminho in-process por-usuário).
+
+    Cria um cliente a partir do ambiente, sobrescrevendo o token com `token`
+    quando fornecido (o JWT do usuário logado, pass-through), e o publica no
+    `ContextVar` enquanto o bloco estiver ativo. As tools chamadas dentro do
+    bloco resolvem ESTE cliente, isolado de outras requests no mesmo processo.
+    Ao sair, fecha o cliente e restaura o contexto anterior.
+
+    Uso (futuro mcp_bridge in-process):
+        async with use_request_client(token=user_jwt):
+            await server.buscar_cliente("ana")
+    """
+    base = Settings.from_env()
+    settings = base if not (token or "").strip() else replace(base, token=token.strip())
+    client = VetFlowClient(settings)
+    reset_token = _client_var.set(client)
+    try:
+        yield client
+    finally:
+        _client_var.reset(reset_token)
+        await client.aclose()
 
 
 def _contains(haystack: Any, needle: str) -> bool:
