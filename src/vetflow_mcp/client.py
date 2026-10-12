@@ -41,7 +41,10 @@ class VetFlowClient:
             base_url=settings.base_url,
             timeout=settings.timeout_s,
         )
-        self._token: str | None = None
+        # Modo pass-through: um JWT pré-fornecido (ex. do usuário logado). Nesse
+        # caso o cliente NÃO faz login nem re-login — usa o token como está.
+        self._token: str | None = settings.token or None
+        self._passthrough = bool(settings.token)
         # Evita duas corrotinas logando ao mesmo tempo no primeiro acesso.
         self._login_lock = asyncio.Lock()
 
@@ -51,7 +54,10 @@ class VetFlowClient:
     # ---- autenticação -------------------------------------------------------
 
     async def _login(self) -> None:
-        """Obtém um JWT novo em POST /auth/login e o guarda em cache."""
+        """Obtém um JWT novo em POST /auth/login e o guarda em cache.
+
+        Não é chamado no modo pass-through (token pré-fornecido).
+        """
         async with self._login_lock:
             resp = await self._http.post(
                 "/auth/login",
@@ -102,8 +108,15 @@ class VetFlowClient:
         headers = await self._auth_headers()
         resp = await self._http.request(method, path, params=params, json=json, headers=headers)
 
-        # Token expirado: re-autentica UMA vez e repete.
+        # Token expirado (401). No modo login, re-autentica UMA vez e repete.
+        # No modo pass-through, o token é do usuário e não pode ser renovado
+        # aqui — devolve um erro claro para a LLM explicar que a sessão expirou.
         if resp.status_code == httpx.codes.UNAUTHORIZED:
+            if self._passthrough:
+                raise VetFlowError(
+                    "Sessão expirada: o token do usuário não é mais válido "
+                    "(faça login novamente no VetFlow)."
+                )
             self._token = None
             headers = await self._auth_headers()
             resp = await self._http.request(method, path, params=params, json=json, headers=headers)
