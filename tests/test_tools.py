@@ -269,3 +269,76 @@ async def test_use_request_client_sem_token_cai_no_env(monkeypatch) -> None:
         )
         async with server.use_request_client() as scoped:
             assert scoped is server._get_client()
+
+
+# --------------------------------------------------------------------------- #
+# Predicados de filtragem client-side — Candidato 3 do refactor.              #
+# Puros: testáveis sem subir o MCP nem mockar o backend.                      #
+# --------------------------------------------------------------------------- #
+
+
+def test_matches_name_full_name_e_name() -> None:
+    """Casa tanto em full_name (Client) quanto em name (demais entidades)."""
+    assert server.matches_name({"full_name": "Ana Lima"}, "ana", "full_name", "name")
+    assert server.matches_name({"name": "Rex"}, "rex", "full_name", "name")
+
+
+def test_matches_name_case_insensitive() -> None:
+    assert server.matches_name({"full_name": "Ana Lima"}, "LIMA", "full_name", "name")
+    assert server.matches_name({"name": "REX"}, "rex", "name")
+
+
+def test_matches_name_needle_vazio_casa_tudo() -> None:
+    """Needle vazio/branco casa com qualquer item (o chamador decide filtrar)."""
+    assert server.matches_name({"full_name": "Ana"}, "", "full_name", "name")
+    assert server.matches_name({"full_name": "Ana"}, "   ", "full_name", "name")
+
+
+def test_matches_name_sem_match_e_campo_ausente() -> None:
+    assert not server.matches_name({"full_name": "Ana"}, "bruno", "full_name", "name")
+    # Campo ausente/None não quebra (tolerante a None).
+    assert not server.matches_name({"full_name": None}, "ana", "full_name", "name")
+    assert not server.matches_name({}, "ana", "full_name", "name")
+
+
+def test_within_window_dentro_e_fora() -> None:
+    from datetime import datetime, timedelta, timezone
+
+    agora = datetime.now(timezone.utc)
+    fim = agora + timedelta(days=30)
+    dentro = {"next_dose_date": (agora + timedelta(days=10)).isoformat()}
+    fora = {"next_dose_date": (agora + timedelta(days=90)).isoformat()}
+    passado = {"next_dose_date": (agora - timedelta(days=1)).isoformat()}
+    assert server.within_window(dentro, "next_dose_date", agora, fim)
+    assert not server.within_window(fora, "next_dose_date", agora, fim)
+    assert not server.within_window(passado, "next_dose_date", agora, fim)
+
+
+def test_within_window_data_invalida_ou_ausente() -> None:
+    from datetime import datetime, timedelta, timezone
+
+    agora = datetime.now(timezone.utc)
+    fim = agora + timedelta(days=30)
+    assert not server.within_window({"next_dose_date": "data-podre"}, "next_dose_date", agora, fim)
+    assert not server.within_window({}, "next_dose_date", agora, fim)
+    assert not server.within_window({"next_dose_date": None}, "next_dose_date", agora, fim)
+
+
+def test_within_window_aceita_sufixo_z() -> None:
+    from datetime import datetime, timezone
+
+    inicio = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    fim = datetime(2026, 12, 31, tzinfo=timezone.utc)
+    item = {"next_dose_date": "2026-06-01T00:00:00Z"}
+    assert server.within_window(item, "next_dose_date", inicio, fim)
+
+
+def test_is_open_invoice() -> None:
+    for status in ("pending", "partial", "overdue"):
+        assert server.is_open_invoice({"status": status})
+    # Case-insensitive.
+    assert server.is_open_invoice({"status": "OVERDUE"})
+    # Fechadas / desconhecidas / ausentes => False.
+    assert not server.is_open_invoice({"status": "paid"})
+    assert not server.is_open_invoice({"status": "cancelled"})
+    assert not server.is_open_invoice({})

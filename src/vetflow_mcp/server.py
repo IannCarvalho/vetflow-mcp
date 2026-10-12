@@ -95,9 +95,73 @@ async def use_request_client(token: str | None = None):
         await client.aclose()
 
 
-def _contains(haystack: Any, needle: str) -> bool:
-    """Match case-insensitive de substring, tolerante a None."""
-    return needle.strip().lower() in str(haystack or "").lower()
+# --------------------------------------------------------------------------- #
+# Predicados de filtragem client-side (o SEAM "filtro aqui no MCP").          #
+#                                                                             #
+# Quatro tools de leitura compartilham um mesmo PORQUÊ: o backend lista sem   #
+# o filtro que a LLM precisa (busca por nome, status aberto, janela de data), #
+# então o filtro mora AQUI. Esse conceito aparecia 4x sem nome. Em vez de um  #
+# QueryBuilder genérico (YAGNI — são 4 usos reais, não um framework), damos   #
+# NOME aos predicados: a locality do "porquê filtramos no MCP" fica num lugar #
+# só, e cada predicado é testável sem subir o servidor. As tools passam a     #
+# COMPOR estes predicados em vez de reimplementar o laço.                     #
+# --------------------------------------------------------------------------- #
+
+# Status de fatura considerados "em aberto" (não quitados).
+_OPEN_INVOICE_STATUSES = frozenset({"pending", "partial", "overdue"})
+
+
+def matches_name(item: dict[str, Any], needle: str, *fields: str) -> bool:
+    """O item casa com `needle` em algum dos `fields` (match de substring).
+
+    Case-insensitive e tolerante a None. `needle` vazio/branco casa com tudo
+    (o chamador decide se nem filtra). Generaliza o antigo `_contains`: as
+    entidades do backend divergem no campo do nome (Client usa `full_name`,
+    as demais usam `name`), então o chamador passa os campos candidatos e o
+    primeiro que casar basta.
+
+    Args:
+        item: dict da entidade (cliente, pet, ...).
+        needle: trecho a procurar.
+        *fields: nomes de campo a inspecionar, em ordem de preferência.
+    """
+    alvo = needle.strip().lower()
+    if not alvo:
+        return True
+    return any(alvo in str(item.get(f) or "").lower() for f in fields)
+
+
+def within_window(
+    item: dict[str, Any], field: str, start: datetime, end: datetime
+) -> bool:
+    """O campo de data `field` do item cai no intervalo fechado [start, end].
+
+    O valor é um timestamp ISO (o sufixo 'Z' é aceito). Ausente ou inválido =>
+    False (o item não entra na janela), espelhando o comportamento anterior de
+    `vacinas_a_vencer`.
+
+    Args:
+        item: dict da entidade.
+        field: nome do campo de data a ler.
+        start: início da janela (inclusive).
+        end: fim da janela (inclusive).
+    """
+    raw = item.get(field)
+    if not raw:
+        return False
+    try:
+        quando = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return start <= quando <= end
+
+
+def is_open_invoice(item: dict[str, Any]) -> bool:
+    """A fatura está em aberto (status pending, partial ou overdue).
+
+    Case-insensitive; status ausente/desconhecido => False.
+    """
+    return str(item.get("status", "")).lower() in _OPEN_INVOICE_STATUSES
 
 
 # --------------------------------------------------------------------------- #
@@ -119,11 +183,10 @@ async def buscar_cliente(nome: str) -> list[dict[str, Any]]:
         Lista de clientes que casam com o trecho (pode ser vazia).
     """
     clientes = await _get_client().get("/clients") or []
-    if not nome.strip():
-        return clientes
-    # O model Client do backend usa `full_name` (as demais entidades usam `name`);
-    # mantemos `name` como fallback por robustez.
-    return [c for c in clientes if _contains(c.get("full_name") or c.get("name"), nome)]
+    # O model Client do backend usa `full_name`; as demais entidades usam `name`.
+    # `matches_name` tolera o needle vazio (devolve tudo), então não precisamos
+    # mais do short-circuit manual.
+    return [c for c in clientes if matches_name(c, nome, "full_name", "name")]
 
 
 @mcp.tool()
@@ -144,9 +207,7 @@ async def buscar_pet(nome: str) -> list[dict[str, Any]]:
         nome: trecho do nome do animal (case-insensitive).
     """
     pets = await _get_client().get("/pets") or []
-    if not nome.strip():
-        return pets
-    return [p for p in pets if _contains(p.get("name"), nome)]
+    return [p for p in pets if matches_name(p, nome, "name")]
 
 
 @mcp.tool()
@@ -199,17 +260,7 @@ async def vacinas_a_vencer(dias: int = 30) -> list[dict[str, Any]]:
     vacinas = await _get_client().get("/vaccines") or []
     agora = datetime.now(timezone.utc)
     limite = agora + timedelta(days=dias)
-    a_vencer: list[dict[str, Any]] = []
-    for v in vacinas:
-        raw = v.get("next_dose_date")
-        if not raw:
-            continue
-        try:
-            proxima = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-        except ValueError:
-            continue
-        if agora <= proxima <= limite:
-            a_vencer.append(v)
+    a_vencer = [v for v in vacinas if within_window(v, "next_dose_date", agora, limite)]
     return sorted(a_vencer, key=lambda v: str(v.get("next_dose_date", "")))
 
 
@@ -245,8 +296,7 @@ async def faturas_pendentes() -> list[dict[str, Any]]:
     O endpoint não filtra por status, então a seleção é feita no MCP.
     """
     faturas = await _get_client().get("/invoices") or []
-    abertas = {"pending", "partial", "overdue"}
-    return [f for f in faturas if str(f.get("status", "")).lower() in abertas]
+    return [f for f in faturas if is_open_invoice(f)]
 
 
 @mcp.tool()
