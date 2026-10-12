@@ -40,6 +40,26 @@ Autenticação: o MCP faz `POST /auth/login` uma vez, guarda o JWT e o injeta co
 `Authorization: Bearer <token>` em cada chamada. O backend escopa todos os dados
 ao vet dono do token — o MCP não gerencia multi-tenancy.
 
+## Por que MCP (e não uma API direta)
+
+Um agente poderia chamar o backend REST diretamente. O ganho de expor as
+ferramentas via **MCP** — um padrão aberto (Model Context Protocol) — é a
+**reutilização**: as mesmas ferramentas, escritas uma única vez aqui, funcionam
+em **qualquer cliente MCP**, sem reescrever nada.
+
+- **Claude Desktop** — aponte este servidor (ver abaixo) e o Claude já consulta a
+  clínica, sem precisar do `vetflow-agent`.
+- **vetflow-agent** — o agente web do VetFlow sobe este MCP como subprocesso e
+  expõe o chat no frontend.
+- **Qualquer outro cliente MCP** — Cursor, IDEs, outros agentes: todos falam o
+  mesmo protocolo.
+
+Em outras palavras: o MCP é uma **fronteira reutilizável**. A lógica de "como
+traduzir uma intenção em linguagem natural numa chamada autenticada ao backend"
+mora num só lugar e serve a todos os consumidores — em vez de cada agente
+reimplementar esse acoplamento. As descrições das tools (docstrings PT-BR) são o
+que cada LLM lê para decidir *quando* e *como* usá-las.
+
 ## Tools expostas
 
 Fase 1 — **só-leitura** (10 tools, todas em `server.py`):
