@@ -205,3 +205,67 @@ def test_main_registra_writes_sob_flag(monkeypatch) -> None:
     nomes = {t.name for t in asyncio.run(server.mcp.list_tools())}
     assert "registrar_consulta" in nomes
     assert "registrar_vacina" in nomes
+
+
+# --------------------------------------------------------------------------- #
+# Resolução do cliente por-request (contextvars) — Candidato 1 do refactor.   #
+# --------------------------------------------------------------------------- #
+
+
+async def test_use_request_client_tem_precedencia_sobre_o_global(monkeypatch) -> None:
+    """Dentro de use_request_client, _get_client resolve o cliente do contexto."""
+    monkeypatch.setenv("VETFLOW_BASE_URL", BASE)
+    monkeypatch.setenv("VETFLOW_EMAIL", "v@t")
+    monkeypatch.setenv("VETFLOW_PASSWORD", "pw")
+    sentinela_global = object()
+    server._client = sentinela_global  # type: ignore[assignment]
+    try:
+        with respx.mock:
+            respx.post(f"{BASE}/auth/login").mock(
+                return_value=httpx.Response(200, json={"token": "jwt"})
+            )
+            async with server.use_request_client(token="jwt-do-usuario") as scoped:
+                # Dentro do contexto: ganha o cliente escopado, não o global.
+                assert server._get_client() is scoped
+                assert scoped is not sentinela_global
+        # Fora do contexto: volta ao global (fallback / modo subprocesso).
+        assert server._get_client() is sentinela_global
+    finally:
+        server._client = None
+
+
+async def test_use_request_client_isola_requests_concorrentes(monkeypatch) -> None:
+    """Dois contextos concorrentes resolvem clientes diferentes (sem vazamento)."""
+    import asyncio
+
+    monkeypatch.setenv("VETFLOW_BASE_URL", BASE)
+    monkeypatch.setenv("VETFLOW_EMAIL", "v@t")
+    monkeypatch.setenv("VETFLOW_PASSWORD", "pw")
+    server._client = None
+
+    async def capture(token: str) -> int:
+        with respx.mock:
+            respx.post(f"{BASE}/auth/login").mock(
+                return_value=httpx.Response(200, json={"token": token})
+            )
+            async with server.use_request_client(token=token):
+                await asyncio.sleep(0)  # cede o loop para intercalar as corrotinas
+                return id(server._get_client())
+
+    a, b = await asyncio.gather(capture("token-A"), capture("token-B"))
+    assert a != b  # cada request viu o seu próprio cliente
+
+
+async def test_use_request_client_sem_token_cai_no_env(monkeypatch) -> None:
+    """Sem token explícito, usa o Settings.from_env (modo login/conta de serviço)."""
+    monkeypatch.setenv("VETFLOW_BASE_URL", BASE)
+    monkeypatch.setenv("VETFLOW_EMAIL", "v@t")
+    monkeypatch.setenv("VETFLOW_PASSWORD", "pw")
+    monkeypatch.delenv("VETFLOW_TOKEN", raising=False)
+    server._client = None
+    with respx.mock:
+        respx.post(f"{BASE}/auth/login").mock(
+            return_value=httpx.Response(200, json={"token": "jwt"})
+        )
+        async with server.use_request_client() as scoped:
+            assert scoped is server._get_client()
