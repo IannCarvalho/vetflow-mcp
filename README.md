@@ -135,6 +135,17 @@ pytest                 # testes (backend mockado, não precisa do VetFlow no ar)
 python -m vetflow_mcp.server   # sobe o servidor via stdio
 ```
 
+### Nota: leitura de env e ordem de import
+
+O MCP lê suas variáveis (`VETFLOW_*`) em `config.py` e fala com o backend via
+**`httpx`** — ele **não importa o `litellm`** (o LLM mora no
+[`vetflow-agent`](../vetflow-agent), não aqui). Logo, a regra de ordenar
+`load_dotenv()` **antes** de `import litellm` — porque o LiteLLM lê o ambiente no
+momento do `import` — é uma exigência **do agent**, documentada no README dele,
+e **não se aplica a este servidor**. Registrada aqui só para quem navega os dois
+repositórios não procurar essa ordenação no lugar errado: no `vetflow-mcp` não há
+import que leia env no load, então não há ordem a preservar.
+
 ## Ligar no Claude Desktop
 
 No `claude_desktop_config.json` (aponte para o python do venv):
