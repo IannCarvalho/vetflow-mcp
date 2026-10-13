@@ -4,13 +4,13 @@
 [![codecov](https://codecov.io/gh/IannCarvalho/vetflow-mcp/branch/main/graph/badge.svg)](https://codecov.io/gh/IannCarvalho/vetflow-mcp)
 
 Servidor **MCP (Model Context Protocol)** que expõe o backend do
-[VetFlow](../vetflow-backend) — um SaaS de gestão veterinária — como ferramentas
+[VetFlow](https://github.com/IannCarvalho/vetflow-backend) — um SaaS de gestão veterinária — como ferramentas
 que qualquer LLM compatível pode chamar em linguagem natural: *"quantas
 consultas tenho hoje?"*, *"as vacinas do Rex estão em dia?"*, *"me dá o resumo
 da clínica"*.
 
 **Consumidores:** além de clientes MCP de desktop (Claude Desktop etc.), este
-servidor é consumido pelo [`vetflow-agent`](../vetflow-agent), que o sobe como
+servidor é consumido pelo [`vetflow-agent`](https://github.com/IannCarvalho/vetflow-agent), que o sobe como
 subprocesso stdio e expõe o chat no frontend do VetFlow. É o `vetflow-mcp` que
 dá ao agente as **ferramentas** para ler dados reais — o LLM sozinho não conhece
 a clínica.
@@ -139,7 +139,7 @@ python -m vetflow_mcp.server   # sobe o servidor via stdio
 
 O MCP lê suas variáveis (`VETFLOW_*`) em `config.py` e fala com o backend via
 **`httpx`** — ele **não importa o `litellm`** (o LLM mora no
-[`vetflow-agent`](../vetflow-agent), não aqui). Logo, a regra de ordenar
+[`vetflow-agent`](https://github.com/IannCarvalho/vetflow-agent), não aqui). Logo, a regra de ordenar
 `load_dotenv()` **antes** de `import litellm` — porque o LiteLLM lê o ambiente no
 momento do `import` — é uma exigência **do agent**, documentada no README dele,
 e **não se aplica a este servidor**. Registrada aqui só para quem navega os dois
