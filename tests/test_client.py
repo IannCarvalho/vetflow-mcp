@@ -140,3 +140,34 @@ def test_config_aceita_token_sem_email_senha(monkeypatch) -> None:
     s = Settings.from_env()
     assert s.token == "jwt-user"
     assert s.base_url == BASE
+
+
+def test_config_token_override_dispensa_email_senha(monkeypatch) -> None:
+    """Regressão: o pass-through in-process passa o JWT como token_override.
+
+    O ambiente do deploy NÃO tem VETFLOW_TOKEN nem EMAIL/PASSWORD (auth é
+    pass-through). from_env precisa aceitar o token do request via argumento,
+    SEM exigir email/senha. Antes do fix, from_env() validava o ambiente vazio
+    e levantava RuntimeError antes de o token do request ser injetado — o que
+    quebrava o /chat logado com 'faltam VETFLOW_EMAIL, VETFLOW_PASSWORD'.
+    """
+    monkeypatch.setenv("VETFLOW_BASE_URL", BASE)
+    monkeypatch.delenv("VETFLOW_TOKEN", raising=False)
+    monkeypatch.delenv("VETFLOW_EMAIL", raising=False)
+    monkeypatch.delenv("VETFLOW_PASSWORD", raising=False)
+
+    s = Settings.from_env(token_override="jwt-do-usuario")
+    assert s.token == "jwt-do-usuario"
+    assert s.email == ""
+    assert s.base_url == BASE
+
+
+def test_config_sem_token_nenhum_ainda_exige_email_senha(monkeypatch) -> None:
+    """O caminho sem token (modo login/Claude Desktop) segue exigindo credencial."""
+    monkeypatch.setenv("VETFLOW_BASE_URL", BASE)
+    monkeypatch.delenv("VETFLOW_TOKEN", raising=False)
+    monkeypatch.delenv("VETFLOW_EMAIL", raising=False)
+    monkeypatch.delenv("VETFLOW_PASSWORD", raising=False)
+
+    with pytest.raises(RuntimeError, match="VETFLOW_EMAIL"):
+        Settings.from_env()
