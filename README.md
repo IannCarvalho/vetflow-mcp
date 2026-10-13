@@ -72,11 +72,13 @@ distintos, com CI e versionamento próprios.
 
 O agente **consome** este servidor sem fundir código: ele o inclui como git
 **submodule** (`vendor/vetflow-mcp`), o que mantém o deploy do agente autocontido
-sem transformar o MCP num detalhe interno dele. E a dor de ter dois *processos*
-(o agente sobe o MCP como subprocesso, custo de RAM) se resolve movendo o MCP
-para **in-process** no agente quando a escala exigir — isso elimina o segundo
-processo mantendo os dois repositórios separados e o modo stdio intacto para o
-Claude Desktop.
+sem transformar o MCP num detalhe interno dele. A dor de ter dois *processos* (o
+agente subindo o MCP como subprocesso, custo de RAM) é resolvida em produção
+consumindo o MCP **in-process** no agente — isso elimina o segundo processo
+mantendo os dois repositórios separados e o modo stdio intacto para o Claude
+Desktop. O isolamento por-usuário no modo in-process é preservado por
+`contextvars` (`use_request_client`): cada request carrega seu próprio client e
+token, sem o furo do `_client` singleton global.
 
 ## Tools expostas
 
@@ -160,9 +162,12 @@ vetflow-mcp/
 ├── pyproject.toml
 ├── .env.example
 ├── src/vetflow_mcp/
-│   ├── config.py     # lê VETFLOW_* do ambiente
-│   ├── client.py     # HTTP autenticado: login, cache de token, refresh em 401
-│   └── server.py     # MCPServer (mcp 2.x) + as tools
+│   ├── config.py       # lê VETFLOW_* do ambiente
+│   ├── client.py       # HTTP autenticado: login, cache de token, refresh em 401; client por-request via contextvars
+│   ├── server.py       # MCPServer (mcp 2.x) + as 10 tools de leitura
+│   └── write_tools.py  # tools de escrita opt-in (VETFLOW_ENABLE_WRITES)
 └── tests/
-    └── test_client.py
+    ├── test_client.py
+    ├── test_tools.py
+    └── test_write_tools.py
 ```
