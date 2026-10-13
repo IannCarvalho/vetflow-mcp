@@ -41,12 +41,19 @@ class Settings:
     enable_writes: bool = False
 
     @classmethod
-    def from_env(cls) -> Settings:
-        """Monta Settings a partir do ambiente, validando o que é obrigatório."""
+    def from_env(cls, token_override: str | None = None) -> Settings:
+        """Monta Settings a partir do ambiente, validando o que é obrigatório.
+
+        `token_override`, quando fornecido, é o JWT do usuário logado repassado
+        por request (pass-through in-process via `use_request_client`). Ele conta
+        como credencial válida: tendo-o, email/senha NÃO são exigidos, mesmo que
+        `VETFLOW_TOKEN` não esteja no ambiente. Sem ele, cai na regra anterior
+        (token do ambiente OU email+senha).
+        """
         base_url = os.environ.get("VETFLOW_BASE_URL", "").rstrip("/")
         email = os.environ.get("VETFLOW_EMAIL", "")
         password = os.environ.get("VETFLOW_PASSWORD", "")
-        token = os.environ.get("VETFLOW_TOKEN", "").strip()
+        token = (token_override or "").strip() or os.environ.get("VETFLOW_TOKEN", "").strip()
 
         # base_url é sempre obrigatório. Para auth, aceita token (pass-through)
         # OU o par email+senha (login). Só exige email/senha quando não há token.

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -84,8 +83,7 @@ async def use_request_client(token: str | None = None):
         async with use_request_client(token=user_jwt):
             await server.buscar_cliente("ana")
     """
-    base = Settings.from_env()
-    settings = base if not (token or "").strip() else replace(base, token=token.strip())
+    settings = Settings.from_env(token_override=token)
     client = VetFlowClient(settings)
     reset_token = _client_var.set(client)
     try:
