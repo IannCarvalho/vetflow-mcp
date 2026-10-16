@@ -27,6 +27,59 @@ if TYPE_CHECKING:  # evita import circular em runtime
     from .client import VetFlowClient
 
 
+# Corpos de POST/PUT compartilhados entre "criar" e "atualizar". As tools mantêm
+# os parâmetros explícitos (são o schema que a LLM lê); só a montagem do JSON
+# mora aqui, para os dois lados não divergirem.
+
+
+def _client_payload(
+    full_name: str,
+    phone: str,
+    cpf: str,
+    street: str,
+    number: str,
+    complement: str,
+    zip_code: str,
+) -> dict[str, Any]:
+    """Corpo de POST/PUT /clients (o backend espera o endereço aninhado)."""
+    return {
+        "full_name": full_name,
+        "phone": phone,
+        "cpf": cpf,
+        "address": {
+            "street": street,
+            "number": number,
+            "complement": complement,
+            "zip_code": zip_code,
+        },
+    }
+
+
+def _pet_payload(
+    owner_id: str,
+    name: str,
+    species: str,
+    breed: str,
+    age: int,
+    age_unit: str,
+    sex: str,
+    neutered: bool,
+    weight: float,
+) -> dict[str, Any]:
+    """Corpo de POST/PUT /pets."""
+    return {
+        "owner_id": owner_id,
+        "name": name,
+        "species": species,
+        "breed": breed,
+        "age": age,
+        "age_unit": age_unit,
+        "sex": sex,
+        "neutered": neutered,
+        "weight": weight,
+    }
+
+
 def register_write_tools(
     mcp: MCPServer, get_client: Callable[[], VetFlowClient]
 ) -> None:
@@ -60,17 +113,7 @@ def register_write_tools(
         Returns:
             O cliente criado (com id atribuído pelo backend).
         """
-        payload = {
-            "full_name": full_name,
-            "phone": phone,
-            "cpf": cpf,
-            "address": {
-                "street": street,
-                "number": number,
-                "complement": complement,
-                "zip_code": zip_code,
-            },
-        }
+        payload = _client_payload(full_name, phone, cpf, street, number, complement, zip_code)
         return await get_client().post("/clients", json=payload) or {}
 
     @mcp.tool()
@@ -91,17 +134,7 @@ def register_write_tools(
             full_name, phone: obrigatórios.
             cpf, street, number, complement, zip_code: opcionais.
         """
-        payload = {
-            "full_name": full_name,
-            "phone": phone,
-            "cpf": cpf,
-            "address": {
-                "street": street,
-                "number": number,
-                "complement": complement,
-                "zip_code": zip_code,
-            },
-        }
+        payload = _client_payload(full_name, phone, cpf, street, number, complement, zip_code)
         return await get_client().put(f"/clients/{cliente_id}", json=payload) or {}
 
     # ----- Pets ------------------------------------------------------------- #
@@ -129,17 +162,7 @@ def register_write_tools(
             neutered: castrado?
             weight: peso em kg.
         """
-        payload = {
-            "owner_id": owner_id,
-            "name": name,
-            "species": species,
-            "breed": breed,
-            "age": age,
-            "age_unit": age_unit,
-            "sex": sex,
-            "neutered": neutered,
-            "weight": weight,
-        }
+        payload = _pet_payload(owner_id, name, species, breed, age, age_unit, sex, neutered, weight)
         return await get_client().post("/pets", json=payload) or {}
 
     @mcp.tool()
@@ -162,17 +185,7 @@ def register_write_tools(
             owner_id, name, species: obrigatórios.
             demais campos: opcionais (ver criar_pet).
         """
-        payload = {
-            "owner_id": owner_id,
-            "name": name,
-            "species": species,
-            "breed": breed,
-            "age": age,
-            "age_unit": age_unit,
-            "sex": sex,
-            "neutered": neutered,
-            "weight": weight,
-        }
+        payload = _pet_payload(owner_id, name, species, breed, age, age_unit, sex, neutered, weight)
         return await get_client().put(f"/pets/{pet_id}", json=payload) or {}
 
     # ----- Agenda ----------------------------------------------------------- #
