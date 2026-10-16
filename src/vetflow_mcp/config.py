@@ -7,12 +7,36 @@ automaticamente. Em produção, defina as variáveis no ambiente do processo
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
 load_dotenv()  # no-op se não houver .env
+
+DEFAULT_TIMEOUT_S = 15.0
+
+
+def _parse_timeout(raw: str) -> float:
+    """Lê VETFLOW_TIMEOUT_S: vazio usa o default; inválido falha com mensagem clara.
+
+    Sem isto, um valor como "15s" derrubava o servidor com um ValueError cru
+    ("could not convert string to float") em vez de dizer qual variável corrigir.
+    """
+    text = raw.strip()
+    if not text:
+        return DEFAULT_TIMEOUT_S
+    try:
+        value = float(text)
+    except ValueError:
+        value = math.nan
+    if not math.isfinite(value) or value <= 0:
+        raise RuntimeError(
+            f"VETFLOW_TIMEOUT_S inválido: {raw!r}. Use um número positivo de "
+            "segundos (ex.: 15)."
+        )
+    return value
 
 
 @dataclass(frozen=True)
@@ -37,7 +61,7 @@ class Settings:
     email: str
     password: str
     token: str = ""
-    timeout_s: float = 15.0
+    timeout_s: float = DEFAULT_TIMEOUT_S
     enable_writes: bool = False
 
     @classmethod
@@ -73,7 +97,7 @@ class Settings:
                 "VETFLOW_PASSWORD, além de VETFLOW_BASE_URL."
             )
 
-        timeout_s = float(os.environ.get("VETFLOW_TIMEOUT_S", "15"))
+        timeout_s = _parse_timeout(os.environ.get("VETFLOW_TIMEOUT_S", ""))
         enable_writes = os.environ.get("VETFLOW_ENABLE_WRITES", "").strip().lower() in (
             "1",
             "true",

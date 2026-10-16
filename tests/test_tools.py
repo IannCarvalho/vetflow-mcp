@@ -9,6 +9,7 @@ from __future__ import annotations
 import httpx
 import pytest
 import respx
+from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 
 from vetflow_mcp import server
 from vetflow_mcp.client import VetFlowClient
@@ -188,6 +189,46 @@ def test_main_sem_credencial_sai_com_erro(monkeypatch) -> None:
         monkeypatch.delenv(var, raising=False)
     with pytest.raises(SystemExit):
         server.main()
+
+
+def test_main_timeout_invalido_sai_com_mensagem(monkeypatch) -> None:
+    monkeypatch.setenv("VETFLOW_BASE_URL", BASE)
+    monkeypatch.setenv("VETFLOW_TOKEN", "jwt")
+    monkeypatch.setenv("VETFLOW_TIMEOUT_S", "15s")
+    with pytest.raises(SystemExit, match="VETFLOW_TIMEOUT_S"):
+        server.main()
+
+
+# --------------------------------------------------------------------------- #
+# Caminho real do SDK (MCPServer.call_tool), não a função Python direto.      #
+#                                                                             #
+# Regressão: no mcp 2.x, só uma ToolError tem a mensagem repassada ao modelo; #
+# o resto vira "Error executing tool <nome>". Chamar a tool direto (como os   #
+# testes acima) não passa por esse embrulho, então não pegaria o problema.    #
+# --------------------------------------------------------------------------- #
+
+
+async def test_erro_do_backend_chega_ao_modelo_via_sdk(fake_backend) -> None:
+    fake_backend.get(f"{BASE}/pets/p404").mock(
+        return_value=httpx.Response(404, json={"error": "Pet não encontrado"})
+    )
+    with pytest.raises(ToolError, match="Pet não encontrado") as exc:
+        await server.mcp.call_tool("ficha_do_pet", {"pet_id": "p404"})
+    assert not isinstance(exc.value, UnexpectedToolError)  # não é tratado como crash
+
+
+async def test_backend_fora_do_ar_chega_ao_modelo_via_sdk(fake_backend) -> None:
+    fake_backend.get(f"{BASE}/dashboard/stats").mock(
+        side_effect=httpx.ConnectError("All connection attempts failed")
+    )
+    with pytest.raises(ToolError, match="não consegui conectar ao backend"):
+        await server.mcp.call_tool("metricas_dashboard", {})
+
+
+async def test_agenda_do_dia_data_invalida_via_sdk(fake_backend) -> None:
+    with pytest.raises(ToolError, match="YYYY-MM-DD") as exc:
+        await server.mcp.call_tool("agenda_do_dia", {"data": "amanhã"})
+    assert not isinstance(exc.value, UnexpectedToolError)
 
 
 def test_main_registra_writes_sob_flag(monkeypatch) -> None:
