@@ -5,12 +5,15 @@ Expõe o backend veterinário como ferramentas MCP que qualquer LLM compatível
 tool traduz a intenção em uma chamada HTTP autenticada (via VetFlowClient) e
 formata a resposta — nenhuma regra de negócio é duplicada aqui.
 
-As tools são de LEITURA (fase 1). Escrita (criar consulta, lançar fatura, etc.)
-fica como fase 2 opcional, intencionalmente de fora para um MCP seguro de expor.
+As 10 tools deste módulo são de LEITURA e ficam sempre expostas. As de escrita
+(criar/atualizar, em `write_tools.py`) são opt-in: `main()` só as registra com
+VETFLOW_ENABLE_WRITES=true.
 
 Execução (stdio, o transporte padrão para clientes desktop):
     uv run vetflow-mcp
     # ou:  python -m vetflow_mcp.server
+
+Consumo in-process (sem subprocesso): ver `use_request_client`.
 """
 
 from __future__ import annotations
@@ -57,8 +60,8 @@ _client: VetFlowClient | None = None
 def _get_client() -> VetFlowClient:
     """Resolve o VetFlowClient: contexto da request primeiro, senão o de módulo.
 
-    Interface preservada: as 11 tools (e o `write_tools`) continuam chamando
-    isto sem mudança.
+    Interface preservada: as 10 tools de leitura (e o `write_tools`) continuam
+    chamando isto sem mudança.
     """
     scoped = _client_var.get()
     if scoped is not None:
@@ -79,9 +82,9 @@ async def use_request_client(token: str | None = None):
     bloco resolvem ESTE cliente, isolado de outras requests no mesmo processo.
     Ao sair, fecha o cliente e restaura o contexto anterior.
 
-    Uso (futuro mcp_bridge in-process):
+    Uso (é o caminho do `_connect_inprocess` do vetflow-agent):
         async with use_request_client(token=user_jwt):
-            await server.buscar_cliente("ana")
+            await mcp.call_tool("buscar_cliente", {"nome": "ana"})
     """
     settings = Settings.from_env(token_override=token)
     client = VetFlowClient(settings)

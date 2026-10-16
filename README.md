@@ -97,14 +97,15 @@ Fase 1 — **só-leitura** (10 tools, todas em `server.py`):
 | `faturas_pendentes()` | `GET /invoices` (filtra status no MCP) | financeiro em aberto |
 | `metricas_dashboard()` | `GET /dashboard/stats` | "resumo da clínica" |
 
-Escrita (criar consulta, lançar fatura) é fase 2 opcional, deixada de fora de
-propósito para um MCP seguro de expor.
+Só a superfície de leitura fica exposta por padrão — é o que torna seguro ligar
+este MCP a qualquer cliente. Escrita existe, mas é opt-in (abaixo).
 
 ### Fase 2 — tools de escrita (opt-in)
 
 Desligadas por padrão. Defina `VETFLOW_ENABLE_WRITES=true` para registrá-las.
 Cobrem apenas CREATE/UPDATE — **DELETE não é exposto** (destrutivo e
-irreversível, deixado de fora de propósito):
+irreversível, deixado de fora de propósito) e não há escrita financeira
+(faturas são só leitura):
 
 | Tool | Endpoint |
 |---|---|
@@ -132,8 +133,22 @@ pip install -e ".[dev]"
 cp .env.example .env   # preencha VETFLOW_BASE_URL / EMAIL / PASSWORD
 
 pytest                 # testes (backend mockado, não precisa do VetFlow no ar)
-python -m vetflow_mcp.server   # sobe o servidor via stdio
+python -m vetflow_mcp.server   # sobe o servidor via stdio (ou: vetflow-mcp)
 ```
+
+### Variáveis de ambiente
+
+| Variável | Obrigatória | Papel |
+|---|---|---|
+| `VETFLOW_BASE_URL` | sim | URL raiz da API Go, ex. `http://localhost:8080`. |
+| `VETFLOW_TOKEN` | uma das duas formas de auth | JWT pré-fornecido (**pass-through**): o MCP usa o token como está, sem login. Se ele expirar, a tool devolve "Sessão expirada" — não há como renová-lo aqui. |
+| `VETFLOW_EMAIL` / `VETFLOW_PASSWORD` | uma das duas formas de auth | Modo **login**: `POST /auth/login` no primeiro uso, com re-login automático em 401. É o modo do Claude Desktop. |
+| `VETFLOW_TIMEOUT_S` | não (default `15`) | Timeout por requisição HTTP, em segundos. |
+| `VETFLOW_ENABLE_WRITES` | não (default `false`) | Registra as tools de escrita (`true`/`1`/`yes`/`on`). |
+
+Com `VETFLOW_TOKEN` definido, email/senha são ignorados. Em desenvolvimento, um
+`.env` na raiz é carregado automaticamente (`config.py`); variáveis já presentes
+no ambiente têm precedência sobre ele.
 
 ### Nota: leitura de env e ordem de import
 
@@ -166,19 +181,66 @@ No `claude_desktop_config.json` (aponte para o python do venv):
 }
 ```
 
+No Linux/macOS o `command` é `/caminho/para/vetflow-mcp/.venv/bin/python`.
+
+## Uso in-process (como o `vetflow-agent` consome)
+
+Além do stdio, o pacote pode ser chamado **no mesmo processo** — é assim que o
+agente roda em produção, sem subir um segundo interpretador Python:
+
+```python
+from vetflow_mcp import server
+
+async with server.use_request_client(token=jwt_do_usuario):
+    tools = await server.mcp.list_tools()
+    resultado = await server.mcp.call_tool("buscar_cliente", {"nome": "ana"})
+```
+
+- `use_request_client(token=...)` escopa um `VetFlowClient` à request atual via
+  `contextvars`: duas requests concorrentes no mesmo processo não enxergam o
+  token uma da outra. Sem `token`, cai no `Settings.from_env()` (email/senha).
+- No caminho in-process, `MCPServer.call_tool` **levanta** `ToolError` em caso
+  de falha (no stdio, o cliente recebe `isError=true`); a mensagem da exceção é
+  o que deve chegar ao modelo.
+- As tools de escrita só são registradas por `main()` (entry point do stdio).
+  Quem importa o `server` direto recebe **só as de leitura**, mesmo com
+  `VETFLOW_ENABLE_WRITES=true`. Para tê-las in-process, registre-as uma vez como
+  o `main()` faz: `register_write_tools(server.mcp, server._get_client)`.
+
 ## Estrutura
 
 ```
 vetflow-mcp/
 ├── pyproject.toml
 ├── .env.example
+├── .github/workflows/ci.yml   # ruff + pytest (com cobertura) na matriz de Python
 ├── src/vetflow_mcp/
 │   ├── config.py       # lê VETFLOW_* do ambiente
-│   ├── client.py       # HTTP autenticado: login, cache de token, refresh em 401; client por-request via contextvars
-│   ├── server.py       # MCPServer (mcp 2.x) + as 10 tools de leitura
+│   ├── client.py       # HTTP autenticado: login, cache de token, refresh em 401; erros legíveis
+│   ├── server.py       # MCPServer (mcp 2.x) + as 10 tools de leitura; client por-request via contextvars
 │   └── write_tools.py  # tools de escrita opt-in (VETFLOW_ENABLE_WRITES)
+├── scripts/
+│   ├── smoke_e2e.py        # verificação manual das tools de leitura contra um backend vivo
+│   └── smoke_write_e2e.py  # idem para escrita (CRIA dados de verdade no backend)
 └── tests/
     ├── test_client.py
     ├── test_tools.py
     └── test_write_tools.py
+```
+
+## Desenvolvimento
+
+Os mesmos comandos que o CI roda:
+
+```bash
+ruff check .
+pytest -q --cov=vetflow_mcp --cov-report=term-missing
+```
+
+Os testes mockam o backend com `respx` — não precisam de rede nem do VetFlow no
+ar. Para conferir contra um backend real (lê o `.env`):
+
+```bash
+python scripts/smoke_e2e.py        # só leitura
+python scripts/smoke_write_e2e.py  # escrita: cria cliente, pet e vacina de teste
 ```
