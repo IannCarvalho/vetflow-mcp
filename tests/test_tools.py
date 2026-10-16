@@ -6,9 +6,13 @@ apontando para o backend fake e o remove no fim.
 
 from __future__ import annotations
 
+import asyncio
+from datetime import datetime, timedelta, timezone
+
 import httpx
 import pytest
 import respx
+from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 
 from vetflow_mcp import server
@@ -58,8 +62,6 @@ async def test_metricas_dashboard(fake_backend) -> None:
 
 
 async def test_vacinas_a_vencer_filtra_janela(fake_backend) -> None:
-    from datetime import datetime, timedelta, timezone
-
     agora = datetime.now(timezone.utc)
     dentro = (agora + timedelta(days=10)).isoformat()
     fora = (agora + timedelta(days=90)).isoformat()
@@ -101,7 +103,9 @@ async def test_buscar_cliente_usa_full_name(fake_backend) -> None:
 
 async def test_buscar_cliente_sem_nome_retorna_todos(fake_backend) -> None:
     fake_backend.get(f"{BASE}/clients").mock(
-        return_value=httpx.Response(200, json=[{"id": "1", "full_name": "Ana"}, {"id": "2", "full_name": "Bia"}])
+        return_value=httpx.Response(
+            200, json=[{"id": "1", "full_name": "Ana"}, {"id": "2", "full_name": "Bia"}]
+        )
     )
     assert len(await server.buscar_cliente("  ")) == 2
 
@@ -237,13 +241,15 @@ def test_main_registra_writes_sob_flag(monkeypatch) -> None:
     monkeypatch.setenv("VETFLOW_EMAIL", "v@t")
     monkeypatch.setenv("VETFLOW_PASSWORD", "pw")
     monkeypatch.setenv("VETFLOW_ENABLE_WRITES", "true")
+    # Servidor descartável: registrar as tools no `server.mcp` global deixaria
+    # as de escrita vazando para os testes seguintes.
+    isolado = MCPServer("vetflow-test")
+    monkeypatch.setattr(server, "mcp", isolado)
     # Não deixa o servidor realmente subir (mcp.run bloquearia).
-    monkeypatch.setattr(server.mcp, "run", lambda *a, **k: None)
+    monkeypatch.setattr(isolado, "run", lambda *a, **k: None)
     server.main()
-    # As tools de escrita devem agora existir no servidor global.
-    import asyncio
-
-    nomes = {t.name for t in asyncio.run(server.mcp.list_tools())}
+    # As tools de escrita devem agora existir no servidor.
+    nomes = {t.name for t in asyncio.run(isolado.list_tools())}
     assert "registrar_consulta" in nomes
     assert "registrar_vacina" in nomes
 
@@ -277,8 +283,6 @@ async def test_use_request_client_tem_precedencia_sobre_o_global(monkeypatch) ->
 
 async def test_use_request_client_isola_requests_concorrentes(monkeypatch) -> None:
     """Dois contextos concorrentes resolvem clientes diferentes (sem vazamento)."""
-    import asyncio
-
     monkeypatch.setenv("VETFLOW_BASE_URL", BASE)
     monkeypatch.setenv("VETFLOW_EMAIL", "v@t")
     monkeypatch.setenv("VETFLOW_PASSWORD", "pw")
@@ -343,8 +347,6 @@ def test_matches_name_sem_match_e_campo_ausente() -> None:
 
 
 def test_within_window_dentro_e_fora() -> None:
-    from datetime import datetime, timedelta, timezone
-
     agora = datetime.now(timezone.utc)
     fim = agora + timedelta(days=30)
     dentro = {"next_dose_date": (agora + timedelta(days=10)).isoformat()}
@@ -356,8 +358,6 @@ def test_within_window_dentro_e_fora() -> None:
 
 
 def test_within_window_data_invalida_ou_ausente() -> None:
-    from datetime import datetime, timedelta, timezone
-
     agora = datetime.now(timezone.utc)
     fim = agora + timedelta(days=30)
     assert not server.within_window({"next_dose_date": "data-podre"}, "next_dose_date", agora, fim)
@@ -366,8 +366,6 @@ def test_within_window_data_invalida_ou_ausente() -> None:
 
 
 def test_within_window_aceita_sufixo_z() -> None:
-    from datetime import datetime, timezone
-
     inicio = datetime(2026, 1, 1, tzinfo=timezone.utc)
     fim = datetime(2026, 12, 31, tzinfo=timezone.utc)
     item = {"next_dose_date": "2026-06-01T00:00:00Z"}

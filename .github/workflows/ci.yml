@@ -6,13 +6,25 @@ on:
   pull_request:
     branches: [main]
 
+# O job só lê o código: o GITHUB_TOKEN não precisa de escrita.
+permissions:
+  contents: read
+
+# Um push novo no mesmo PR cancela o run anterior, que ficou obsoleto. Na main
+# nada é cancelado: cada commit mergeado continua com o próprio resultado.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        # 3.14 é o default do Render para serviços Python novos (o agent consome
+        # este pacote in-process lá), 3.10 é o mínimo do requires-python.
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v4

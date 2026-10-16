@@ -1,11 +1,12 @@
 """Smoke test de ESCRITA end-to-end contra o backend local vivo.
 
-Forca VETFLOW_ENABLE_WRITES antes de importar, registra as write tools e
+Força VETFLOW_ENABLE_WRITES antes de importar, registra as write tools e
 exercita criar_cliente -> criar_pet -> registrar_vacina, confirmando por leitura.
-Script de verificacao manual, nao faz parte da suite.
+Script de verificação manual, não faz parte da suíte.
 
-Uso: VETFLOW_ENABLE_WRITES e definido abaixo em runtime (antes de ler Settings),
-entao basta `python scripts/smoke_write_e2e.py` com o .env preenchido.
+Uso: VETFLOW_ENABLE_WRITES é definido abaixo em runtime (antes de ler Settings),
+então basta `python scripts/smoke_write_e2e.py` com o .env preenchido.
+ATENÇÃO: cria dados de verdade no backend apontado por VETFLOW_BASE_URL.
 """
 
 import asyncio
@@ -19,7 +20,9 @@ async def main() -> None:
     from vetflow_mcp.config import Settings
     from vetflow_mcp.write_tools import register_write_tools
 
-    assert Settings.from_env().enable_writes is True
+    # Checagem explícita (não `assert`, que some quando o Python roda com -O).
+    if not Settings.from_env().enable_writes:
+        raise SystemExit("VETFLOW_ENABLE_WRITES não foi aplicado; abortando.")
     register_write_tools(server.mcp, server._get_client)
 
     nomes = {t.name for t in await server.mcp.list_tools()}
