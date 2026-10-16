@@ -100,6 +100,15 @@ Fase 1 — **só-leitura** (10 tools, todas em `server.py`):
 Só a superfície de leitura fica exposta por padrão — é o que torna seguro ligar
 este MCP a qualquer cliente. Escrita existe, mas é opt-in (abaixo).
 
+> **O dia da agenda é o dia em UTC.** `agenda_do_dia` busca a janela
+> `[00:00, 24:00)` em UTC, tanto para o default ("hoje") quanto para uma `data`
+> explícita. É o mesmo critério do resto do produto: o backend conta o
+> `appointments_today` do dashboard com o relógio do servidor (o repositório não
+> define fuso, então UTC no contêiner) e a página de agenda do frontend agrupa os
+> compromissos pela data UTC. No Brasil (UTC-3), a partir das 21h o "hoje" já é
+> o dia seguinte. Mudar só o MCP faria o chat discordar do dashboard, então a
+> correção, se vier, tem que valer para backend, frontend e MCP juntos.
+
 ### Fase 2 — tools de escrita (opt-in)
 
 Desligadas por padrão. Defina `VETFLOW_ENABLE_WRITES=true` para registrá-las.

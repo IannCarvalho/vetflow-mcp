@@ -243,7 +243,10 @@ def register_write_tools(
             date: data da consulta em ISO 8601; vazio = agora no backend.
             evolution_time: há quanto tempo evolui o quadro (opcional).
             pain: o animal apresenta dor? (opcional).
-            notes_summary: resumo livre da consulta (opcional).
+            notes_summary: medicações em uso ou receitadas (opcional). Vai para
+                o campo "Medicações" do resumo da ficha (`summary.medications`),
+                que também pré-preenche o receituário. Não é um resumo livre da
+                consulta: o backend não tem campo para isso.
         """
         payload: dict[str, Any] = {
             "pet_id": pet_id,

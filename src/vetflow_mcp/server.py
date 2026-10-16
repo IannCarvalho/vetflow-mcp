@@ -274,8 +274,8 @@ async def vacinas_a_vencer(dias: int = 30) -> list[dict[str, Any]]:
 async def agenda_do_dia(data: str | None = None) -> list[dict[str, Any]]:
     """Compromissos de um dia específico (padrão: hoje), ordenados por horário.
 
-    Usa a janela [início do dia, início do dia seguinte) via os query params
-    `start`/`end` que o endpoint de agenda aceita.
+    Usa a janela [início do dia, início do dia seguinte), em UTC, via os query
+    params `start`/`end` que o endpoint de agenda aceita.
 
     Args:
         data: dia no formato ISO 'YYYY-MM-DD'. Omitido = hoje (UTC).
