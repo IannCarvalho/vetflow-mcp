@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from .client import VetFlowClient
 from .config import Settings
@@ -277,7 +278,13 @@ async def agenda_do_dia(data: str | None = None) -> list[dict[str, Any]]:
     Args:
         data: dia no formato ISO 'YYYY-MM-DD'. Omitido = hoje (UTC).
     """
-    dia = datetime.fromisoformat(data) if data else datetime.now(timezone.utc)
+    try:
+        dia = datetime.fromisoformat(data) if data else datetime.now(timezone.utc)
+    except ValueError:
+        # ToolError: o SDK repassa a mensagem ao modelo, que pode corrigir a data.
+        raise ToolError(
+            f"Data inválida: {data!r}. Use o formato YYYY-MM-DD (ex.: 2026-10-12)."
+        ) from None
     inicio = datetime(dia.year, dia.month, dia.day, tzinfo=timezone.utc)
     fim = inicio + timedelta(days=1)
     ags = await _get_client().get(

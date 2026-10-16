@@ -5,9 +5,12 @@ Rodar:  uv run pytest   (ou: pytest)
 
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 import pytest
 import respx
+from mcp.server.mcpserver.exceptions import ToolError
 
 from vetflow_mcp.client import VetFlowClient, VetFlowError
 from vetflow_mcp.config import Settings
@@ -81,6 +84,113 @@ async def test_erro_http_vira_vetflowerror_legivel() -> None:
             await client.get("/pets")
     finally:
         await client.aclose()
+
+
+def test_vetflowerror_e_toolerror_do_sdk() -> None:
+    """Regressão: no mcp 2.x só ToolError tem a mensagem repassada ao modelo.
+
+    Qualquer outra exceção vira "Error executing tool <nome>", sem a causa.
+    RuntimeError segue como base por compatibilidade.
+    """
+    erro = VetFlowError("x")
+    assert isinstance(erro, ToolError)
+    assert isinstance(erro, RuntimeError)
+
+
+@respx.mock
+async def test_timeout_vira_vetflowerror_legivel() -> None:
+    respx.post(f"{BASE}/auth/login").mock(
+        return_value=httpx.Response(200, json={"token": "jwt"})
+    )
+    respx.get(f"{BASE}/pets").mock(side_effect=httpx.ConnectTimeout("timed out"))
+
+    client = VetFlowClient(_settings())
+    try:
+        with pytest.raises(VetFlowError, match="não respondeu em 5s"):
+            await client.get("/pets")
+    finally:
+        await client.aclose()
+
+
+@respx.mock
+async def test_conexao_recusada_vira_vetflowerror_legivel() -> None:
+    respx.post(f"{BASE}/auth/login").mock(side_effect=httpx.ConnectError("refused"))
+
+    client = VetFlowClient(_settings())
+    try:
+        with pytest.raises(VetFlowError, match="não consegui conectar ao backend") as exc:
+            await client.get("/pets")
+    finally:
+        await client.aclose()
+    assert isinstance(exc.value.__cause__, httpx.ConnectError)  # causa preservada
+
+
+@respx.mock
+async def test_resposta_2xx_nao_json_vira_vetflowerror() -> None:
+    respx.post(f"{BASE}/auth/login").mock(
+        return_value=httpx.Response(200, json={"token": "jwt"})
+    )
+    respx.get(f"{BASE}/pets").mock(return_value=httpx.Response(200, text="<html>oi</html>"))
+
+    client = VetFlowClient(_settings())
+    try:
+        with pytest.raises(VetFlowError, match="corpo não-JSON"):
+            await client.get("/pets")
+    finally:
+        await client.aclose()
+
+
+@respx.mock
+async def test_login_recusado_vira_vetflowerror() -> None:
+    respx.post(f"{BASE}/auth/login").mock(
+        return_value=httpx.Response(401, json={"error": "invalid credentials"})
+    )
+
+    client = VetFlowClient(_settings())
+    try:
+        with pytest.raises(VetFlowError, match="Falha no login"):
+            await client.get("/pets")
+    finally:
+        await client.aclose()
+
+
+@respx.mock
+async def test_login_200_sem_token_ou_nao_json_vira_vetflowerror() -> None:
+    respx.post(f"{BASE}/auth/login").mock(
+        side_effect=[
+            httpx.Response(200, json={"user": "sem token"}),
+            httpx.Response(200, text="nao-e-json"),
+        ]
+    )
+
+    client = VetFlowClient(_settings())
+    try:
+        for _ in range(2):
+            with pytest.raises(VetFlowError, match="sem campo 'token'"):
+                await client.get("/pets")
+    finally:
+        await client.aclose()
+
+
+@respx.mock
+async def test_requests_concorrentes_fazem_um_login_so() -> None:
+    """O lock evita logins duplicados: quem esperou reaproveita o token novo."""
+
+    async def login_lento(request: httpx.Request) -> httpx.Response:
+        # Suspende de verdade: as outras corrotinas chegam ao lock enquanto isso.
+        await asyncio.sleep(0.01)
+        return httpx.Response(200, json={"token": "jwt"})
+
+    login = respx.post(f"{BASE}/auth/login").mock(side_effect=login_lento)
+    respx.get(f"{BASE}/pets").mock(return_value=httpx.Response(200, json=[]))
+
+    client = VetFlowClient(_settings())
+    try:
+        await asyncio.gather(*(client.get("/pets") for _ in range(5)))
+    finally:
+        await client.aclose()
+
+    assert login.call_count == 1
 
 
 
@@ -170,4 +280,22 @@ def test_config_sem_token_nenhum_ainda_exige_email_senha(monkeypatch) -> None:
     monkeypatch.delenv("VETFLOW_PASSWORD", raising=False)
 
     with pytest.raises(RuntimeError, match="VETFLOW_EMAIL"):
+        Settings.from_env()
+
+
+@pytest.mark.parametrize("valor,esperado", [("", 15.0), ("  ", 15.0), ("30", 30.0), ("2.5", 2.5)])
+def test_config_timeout_vazio_usa_default(monkeypatch, valor, esperado) -> None:
+    monkeypatch.setenv("VETFLOW_BASE_URL", BASE)
+    monkeypatch.setenv("VETFLOW_TOKEN", "jwt")
+    monkeypatch.setenv("VETFLOW_TIMEOUT_S", valor)
+    assert Settings.from_env().timeout_s == esperado
+
+
+@pytest.mark.parametrize("valor", ["15s", "abc", "0", "-3", "nan", "inf"])
+def test_config_timeout_invalido_da_erro_claro(monkeypatch, valor) -> None:
+    """Antes: ValueError cru do float(). Agora: RuntimeError nomeando a variável."""
+    monkeypatch.setenv("VETFLOW_BASE_URL", BASE)
+    monkeypatch.setenv("VETFLOW_TOKEN", "jwt")
+    monkeypatch.setenv("VETFLOW_TIMEOUT_S", valor)
+    with pytest.raises(RuntimeError, match="VETFLOW_TIMEOUT_S"):
         Settings.from_env()

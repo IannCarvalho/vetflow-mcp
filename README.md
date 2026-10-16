@@ -118,6 +118,25 @@ irreversível, deixado de fora de propósito):
 O escopo ao vet autenticado e os campos `vet_id`/`created_at` são setados pelo
 backend a partir do token — as tools enviam só os campos de negócio.
 
+### Erros devolvidos ao modelo
+
+Toda falha vira uma mensagem curta em PT-BR que o modelo lê e consegue explicar
+ao usuário — nunca um traceback cru:
+
+| Situação | O que o modelo recebe |
+|---|---|
+| Backend responde 4xx/5xx | `GET /pets/x falhou (HTTP 404) — Pet não encontrado` |
+| Token pass-through expirado (401) | `Sessão expirada: ... (faça login novamente no VetFlow)` |
+| Timeout (ex.: backend do Render acordando) | `GET /pets: o backend VetFlow não respondeu em 15s. Ele pode estar iniciando ...` |
+| Conexão recusada / DNS | `GET /pets: não consegui conectar ao backend VetFlow em <url> (ConnectError)` |
+| Argumento inválido | `Data inválida: 'amanhã'. Use o formato YYYY-MM-DD (ex.: 2026-10-12).` |
+
+Por isso `VetFlowError` herda de `ToolError`: no `mcp` 2.x, só uma `ToolError`
+tem a mensagem repassada ao cliente. Qualquer outra exceção é tratada como crash
+e o modelo recebe apenas `Error executing tool <nome>`, sem a causa. Os testes
+que passam por `mcp.call_tool(...)` (e não pela função Python direto) cobrem
+esse caminho.
+
 ## Setup
 
 ```bash

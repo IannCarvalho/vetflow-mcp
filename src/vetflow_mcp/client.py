@@ -5,7 +5,8 @@ Responsabilidades, mantidas FORA das tools MCP para manter o server.py fino:
   * injetar `Authorization: Bearer <token>` em toda requisição protegida;
   * re-autenticar automaticamente UMA vez quando o backend responde 401
     (token expirado), e aí repetir a requisição original;
-  * traduzir erros HTTP em uma exceção única e legível para a LLM.
+  * traduzir erros HTTP, de rede (timeout, conexão recusada) e respostas
+    não-JSON em uma exceção única e legível para a LLM (`VetFlowError`).
 
 Toda rota de dados do backend passa por AuthMiddleware e é escopada ao vet
 autenticado pelo próprio token, então o cliente NÃO precisa passar vet_id em
@@ -18,12 +19,21 @@ import asyncio
 from typing import Any
 
 import httpx
+from mcp.server.mcpserver.exceptions import ToolError
 
 from .config import Settings
 
 
-class VetFlowError(RuntimeError):
-    """Erro já formatado para ser devolvido à LLM (mensagem curta e útil)."""
+class VetFlowError(ToolError, RuntimeError):
+    """Erro já formatado para ser devolvido à LLM (mensagem curta e útil).
+
+    Herda de `ToolError` do SDK de propósito: no mcp 2.x só uma `ToolError` tem
+    a mensagem repassada ao modelo. Qualquer outra exceção é tratada como crash
+    e o modelo recebe apenas "Error executing tool <nome>" — sem a causa, ele
+    não consegue explicar ao usuário que a sessão expirou ou que o pet não
+    existe. `RuntimeError` segue como segunda base por compatibilidade com
+    quem já capturava esse tipo.
+    """
 
 
 class VetFlowClient:
@@ -59,7 +69,12 @@ class VetFlowClient:
         Não é chamado no modo pass-through (token pré-fornecido).
         """
         async with self._login_lock:
-            resp = await self._http.post(
+            # Checagem dupla: quem esperava o lock enquanto outra corrotina
+            # logava reaproveita o token novo em vez de logar de novo.
+            if self._token is not None:
+                return
+            resp = await self._send(
+                "POST",
                 "/auth/login",
                 json={"email": self._settings.email, "password": self._settings.password},
             )
@@ -68,8 +83,12 @@ class VetFlowClient:
                     f"Falha no login no VetFlow (HTTP {resp.status_code}). "
                     "Verifique VETFLOW_EMAIL / VETFLOW_PASSWORD."
                 )
-            data = resp.json()
-            token = data.get("token") or data.get("access_token")
+            try:
+                data = resp.json()
+            except ValueError:  # corpo não-JSON
+                data = None
+            body = data if isinstance(data, dict) else {}
+            token = body.get("token") or body.get("access_token")
             if not token:
                 raise VetFlowError(
                     "Login retornou 200 mas sem campo 'token' no corpo — "
@@ -106,7 +125,7 @@ class VetFlowClient:
         json: dict[str, Any] | None = None,
     ) -> Any:
         headers = await self._auth_headers()
-        resp = await self._http.request(method, path, params=params, json=json, headers=headers)
+        resp = await self._send(method, path, params=params, json=json, headers=headers)
 
         # Token expirado (401). No modo login, re-autentica UMA vez e repete.
         # No modo pass-through, o token é do usuário e não pode ser renovado
@@ -117,16 +136,46 @@ class VetFlowClient:
                     "Sessão expirada: o token do usuário não é mais válido "
                     "(faça login novamente no VetFlow)."
                 )
-            self._token = None
+            # Só descarta o token se ainda for o que falhou: outra corrotina
+            # pode tê-lo renovado enquanto esta requisição estava em voo.
+            if headers["Authorization"] == f"Bearer {self._token}":
+                self._token = None
             headers = await self._auth_headers()
-            resp = await self._http.request(method, path, params=params, json=json, headers=headers)
+            resp = await self._send(method, path, params=params, json=json, headers=headers)
 
         if resp.status_code >= 400:
             raise VetFlowError(self._explain_error(method, path, resp))
 
         if not resp.content:
             return None
-        return resp.json()
+        try:
+            return resp.json()
+        except ValueError as exc:  # 2xx com corpo não-JSON (ex.: página de proxy)
+            raise VetFlowError(
+                f"{method} {path}: resposta inesperada do backend "
+                f"(HTTP {resp.status_code}, corpo não-JSON)."
+            ) from exc
+
+    async def _send(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        """Envia a requisição, traduzindo falhas de transporte em `VetFlowError`.
+
+        Sem isto, um timeout ou conexão recusada chega à LLM como um erro cru do
+        httpx. O caso típico é o backend no plano free do Render "dormindo": o
+        primeiro acesso demora a acordar e estoura o timeout.
+        """
+        try:
+            return await self._http.request(method, path, **kwargs)
+        except httpx.TimeoutException as exc:
+            raise VetFlowError(
+                f"{method} {path}: o backend VetFlow não respondeu em "
+                f"{self._settings.timeout_s:g}s. Ele pode estar iniciando ou fora do "
+                "ar; tente novamente em instantes."
+            ) from exc
+        except httpx.RequestError as exc:
+            raise VetFlowError(
+                f"{method} {path}: não consegui conectar ao backend VetFlow em "
+                f"{self._settings.base_url} ({type(exc).__name__})."
+            ) from exc
 
     @staticmethod
     def _explain_error(method: str, path: str, resp: httpx.Response) -> str:
